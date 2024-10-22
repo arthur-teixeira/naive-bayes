@@ -39,20 +39,24 @@ struct Model {
 impl Model {
     fn train(&mut self, news: Vec<News>) {
         for news in news {
-            let class_data = &mut self.classes[news.class_index as usize - 1];
-            class_data.document_count += 1;
-            for word in news.words() {
-                class_data.total_word_count += 1;
-                class_data
-                    .word_count
-                    .entry(word)
-                    .and_modify(|c| *c += 1)
-                    .or_insert(1);
-            }
+            self.add_news(&news, news.class_index as usize - 1);
         }
     }
 
-    fn classify(&self, document: &News) -> (usize, f64) {
+    fn add_news(&mut self, news: &News, class_index: usize) {
+        let class_data = &mut self.classes[class_index];
+        class_data.document_count += 1;
+        for word in news.words() {
+            class_data.total_word_count += 1;
+            class_data
+                .word_count
+                .entry(word)
+                .and_modify(|c| *c += 1)
+                .or_insert(1);
+        }
+    }
+
+    fn classify(&mut self, document: &News) -> (usize, f64) {
         // P(class | document) = P(document | class) * P(class) / P(document)
         // P(document) is constant for all classes in a Naive model
         // So P(class | document) can be simplified as P(document | class) * P(class)
@@ -91,17 +95,17 @@ impl Model {
             }
         }
 
+        self.add_news(document, max_class);
         (max_class, max_probability)
     }
 }
 
-fn validate_model(model: &Model) -> Result<(), Box<dyn Error>> {
+fn validate_model(model: &mut Model) -> Result<(), Box<dyn Error>> {
     let test = File::open("./ag-news/test.csv")?;
     let mut reader = csv::Reader::from_reader(test);
     let news: Result<Vec<News>, csv::Error> = reader.deserialize().collect();
     let news = news?;
 
-    // confusion_matrix[predicted][actual]
     let n = model.class_names.len();
     let mut confusion_matrix: Vec<Vec<usize>> = vec![vec![0; n]; n];
     for news in &news {
@@ -124,13 +128,22 @@ fn validate_model(model: &Model) -> Result<(), Box<dyn Error>> {
             }
         }
 
-        precisions[i] = current_true_positives as f64 / (current_true_positives + current_false_positives) as f64;
+        precisions[i] = current_true_positives as f64
+            / (current_true_positives + current_false_positives) as f64;
         true_positives += current_true_positives;
         false_positives += current_false_positives;
         println!("Precision for class {i}: {:?}", precisions[i]);
-    };
+    }
 
-    println!("Overall model precision: {:?}", true_positives as f64 / (true_positives + false_positives) as f64);
+    println!(
+        "Overall model precision: {:?}",
+        true_positives as f64 / (true_positives + false_positives) as f64
+    );
+
+    println!("Confusion matrix:");
+    for i in 0..n {
+        println!("{:?}", confusion_matrix[i]);
+    }
     Ok(())
 }
 
@@ -155,7 +168,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         model.classes.push(Default::default());
     }
     model.train(news);
-    validate_model(&model)?;
+    validate_model(&mut model)?;
 
     Ok(())
 }
